@@ -1,0 +1,35 @@
+import aio_pika
+import asyncio
+import json
+import os
+
+RABBIT_URL = os.getenv("RABBIT_URL")
+EXCHANGE_NAME = "events_topic"
+
+
+async def main():
+    if not RABBIT_URL:
+        raise RuntimeError("RABBIT_URL is not set. Run: set -a; source .env; set +a")
+
+    conn = await aio_pika.connect_robust(RABBIT_URL)
+    ch = await conn.channel()
+
+    ex = await ch.declare_exchange(EXCHANGE_NAME, aio_pika.ExchangeType.TOPIC)
+
+    # durable queue survives broker restart (good practice)
+    queue = await ch.declare_queue("part_events_queue", durable=True)
+
+    # Listen to all part events
+    await queue.bind(ex, routing_key="part.*")
+
+    print("Listening for part events (routing key: 'part.*')...")
+
+    async with queue.iterator() as q:
+        async for msg in q:
+            async with msg.process():
+                data = json.loads(msg.body)
+                print("Part Event:", msg.routing_key, data)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
